@@ -4,6 +4,9 @@
 #include "backend/vertex_pose.h"
 #include "backend/edge_reprojection.h"
 #include "backend/problem.h"
+#include "backend/edge_prior.h"
+#include <vector>
+#include <sophus/se3.hpp>
 
 using namespace myslam::backend;
 using namespace std;
@@ -58,6 +61,8 @@ void GetSimDataInWordFrame(vector<Frame> &cameraPoses, vector<Eigen::Vector3d> &
     }
 }
 
+void check_result(double weight, vector<Eigen::Vector3d> &points, vector<shared_ptr<VertexInverseDepth> > &allPoints,
+    		vector<Frame> &cameras, vector<shared_ptr<VertexPose> > &vertexCams_vec);
 int main() {
     // 准备数据
     vector<Frame> cameras;
@@ -124,6 +129,28 @@ int main() {
         }
     }
 
+    //add prior edges
+    double weight = 300;
+    //prior edge for first frame
+    shared_ptr<EdgeSE3Prior> edge(new EdgeSE3Prior(cameras[0].twc, cameras[0].qwc));
+    vector<shared_ptr<Vertex>> vertex_vec;
+    vertex_vec.push_back(vertexCams_vec[0]);
+    edge->SetVertex(vertex_vec);
+    edge->SetInformation(Mat66::Identity()* weight);
+    problem.AddEdge(edge);
+
+    //prior edge for second frame
+    vertex_vec.clear();
+    edge.reset(new EdgeSE3Prior(cameras[1].twc, cameras[1].qwc));
+	vertex_vec.push_back(vertexCams_vec[1]);
+	edge->SetVertex(vertex_vec);
+	edge->SetInformation(Mat66::Identity()* weight);
+	problem.AddEdge(edge);
+
+
+
+
+
     problem.Solve(5);
 
     std::cout << "\nCompare MonoBA results after opt..." << std::endl;
@@ -140,6 +167,49 @@ int main() {
 
     problem.TestMarginalize();
 
+
+    check_result(weight, points, allPoints, cameras, vertexCams_vec);
+
     return 0;
+}
+
+void check_result(double weight, vector<Eigen::Vector3d> &points, vector<shared_ptr<VertexInverseDepth> > &allPoints,
+		vector<Frame> &cameras, vector<shared_ptr<VertexPose> > &vertexCams_vec){
+	cout<<"Prior weight="<<weight<<endl;
+	//error for feature point depth
+	double depth_errs = 0;
+	for(int i = 0; i< allPoints.size(); i++){
+		double err = 1.0 /points[i].z() - allPoints[i]->Parameters()(0);
+		depth_errs += err * err;
+	}
+	cout << "Feature depth RMSE ="<<sqrt(depth_errs/allPoints.size())<<endl;
+	//error for camera rotation and translation
+	double qw = vertexCams_vec[0]->Parameters()(6);
+	double qx = vertexCams_vec[0]->Parameters()(3);
+	double qy = vertexCams_vec[0]->Parameters()(4);
+	double qz = vertexCams_vec[0]->Parameters()(5);
+	Sophus::SE3 frame1_est(Qd(qw,qx,qy,qz), vertexCams_vec[0]->Parameters().head(3));
+	Sophus::SE3 frame1_gt(cameras[0].qwc, cameras[0].twc);
+	Sophus::SE3 est2gt(frame1_gt*(frame1_est.inverse()));
+	double trans_err = 0;
+	double rot_err = 0;
+	for(int i=1; i< vertexCams_vec.size(); i++){
+		double qw = vertexCams_vec[i]->Parameters()(6);
+		double qx = vertexCams_vec[i]->Parameters()(3);
+		double qy = vertexCams_vec[i]->Parameters()(4);
+		double qz = vertexCams_vec[i]->Parameters()(5);
+		Sophus::SE3 framei(Qd(qw,qx,qy,qz), vertexCams_vec[i]->Parameters().head(3));
+		framei = est2gt*framei;
+		double temp = (framei.translation() - cameras[i].twc).norm();
+		trans_err += temp * temp;
+		temp = Sophus::SO3::log(Sophus::SO3(cameras[i].Rwc.inverse()*framei.rotationMatrix())).norm();
+		rot_err += temp * temp;
+	}
+
+	trans_err = sqrt(trans_err/(vertexCams_vec.size() - 1));
+	rot_err = sqrt(rot_err/(vertexCams_vec.size() - 1));
+	cout<<"Translation RMSE="<<trans_err<<endl;
+	cout<<"Rotation RMSE="<<rot_err<<endl;
+
 }
 
