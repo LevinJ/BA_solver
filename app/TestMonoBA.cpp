@@ -64,6 +64,8 @@ void GetSimDataInWordFrame(vector<Frame> &cameraPoses, vector<Eigen::Vector3d> &
 void check_result(double weight, vector<Eigen::Vector3d> &points, vector<shared_ptr<VertexInverseDepth> > &allPoints,
     		vector<Frame> &cameras, vector<shared_ptr<VertexPose> > &vertexCams_vec);
 int main() {
+	bool add_prior = true;
+	bool use_fixed = false;
     // 准备数据
     vector<Frame> cameras;
     vector<Eigen::Vector3d> points;
@@ -82,8 +84,12 @@ int main() {
         pose << cameras[i].twc, cameras[i].qwc.x(), cameras[i].qwc.y(), cameras[i].qwc.z(), cameras[i].qwc.w();
         vertexCam->SetParameters(pose);
 
-//        if(i < 2)
-//            vertexCam->SetFixed();
+        if(use_fixed){
+        	if(i < 2){
+        		vertexCam->SetFixed();
+        	}
+        }
+
 
         problem.AddVertex(vertexCam);
         vertexCams_vec.push_back(vertexCam);
@@ -129,23 +135,27 @@ int main() {
         }
     }
 
-    //add prior edges
-    double weight = 300;
-    //prior edge for first frame
-    shared_ptr<EdgeSE3Prior> edge(new EdgeSE3Prior(cameras[0].twc, cameras[0].qwc));
-    vector<shared_ptr<Vertex>> vertex_vec;
-    vertex_vec.push_back(vertexCams_vec[0]);
-    edge->SetVertex(vertex_vec);
-    edge->SetInformation(Mat66::Identity()* weight);
-    problem.AddEdge(edge);
+    double weight = 0;
+    if(add_prior){
+    	//add prior edges
+		weight = 300;
+		//prior edge for first frame
+		shared_ptr<EdgeSE3Prior> edge(new EdgeSE3Prior(cameras[0].twc, cameras[0].qwc));
+		vector<shared_ptr<Vertex>> vertex_vec;
+		vertex_vec.push_back(vertexCams_vec[0]);
+		edge->SetVertex(vertex_vec);
+		edge->SetInformation(Mat66::Identity()* weight);
+		problem.AddEdge(edge);
 
-    //prior edge for second frame
-    vertex_vec.clear();
-    edge.reset(new EdgeSE3Prior(cameras[1].twc, cameras[1].qwc));
-	vertex_vec.push_back(vertexCams_vec[1]);
-	edge->SetVertex(vertex_vec);
-	edge->SetInformation(Mat66::Identity()* weight);
-	problem.AddEdge(edge);
+		//prior edge for second frame
+		vertex_vec.clear();
+		edge.reset(new EdgeSE3Prior(cameras[1].twc, cameras[1].qwc));
+		vertex_vec.push_back(vertexCams_vec[1]);
+		edge->SetVertex(vertex_vec);
+		edge->SetInformation(Mat66::Identity()* weight);
+		problem.AddEdge(edge);
+    }
+
 
 
 
